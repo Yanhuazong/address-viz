@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Map Display and Address Submission</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <style>
+        #map { height: 600px; }
+        @media (max-width: 768px) {
+            #map {
+                height: 650px;
+            }
+        }
+        .flex{
+            display:flex;
+        }
+        h1{
+            margin-top:2rem;
+        }
+        #address{
+            height:3rem;
+            width: 100%;
+            font-size: 1.2rem;
+        }
+        #latitude,#longitude{
+            border:none;
+        }
+        .intro{
+            display:flex;
+            flex-direction:column;
+            align-items:center;
+        }
+        #map{
+            height: 500px;
+            width: 100%;
+        }
+        @media (max-width: 768px) {
+            #map{
+                height:650px;
+            }
+        }
+        form{
+            width:80%;
+        }
+    </style>
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBAQVZn49amHpdT_nCPLW_jNFd7l7h3yeI&libraries=places"></script>
+</head>
+<body>
+    <div class="intro">
+    <h1 style="text-align:center;">Where are we from?</h1>
+    
+    <!-- Form for submitting addresses -->
+    <form id="address-form">
+
+        <div class="flex">
+        <input type="text" id="address" name="address" required>
+        <button type="submit" id="submit-button" disabled>Submit</button>
+        </div>
+        <div class="flex">
+            <input type="text" id="latitude" name="latitude" required hidden>
+            <input type="text" id="longitude" name="longitude" required hidden>
+            </div>
+        <p id="error-message" style="color: red;"></p>
+    </form>
+    </div>
+    <p>Number of Locations: <span id="location-count"></span></p>
+
+    <div id="map"></div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/9.1.1/firebase-app.js";
+        import {
+            getFirestore,
+            collection,
+            getDocs,
+            addDoc,
+        } from "https://www.gstatic.com/firebasejs/9.1.1/firebase-firestore.js";
+
+        // Your web app's Firebase configuration
+            const firebaseConfig = {
+            apiKey: "AIzaSyA_ylpAa6AVG4BbhoQ96g3RqkHIQLardpU",
+            authDomain: "viz-address.firebaseapp.com",
+            projectId: "viz-address",
+            storageBucket: "viz-address.appspot.com",
+            messagingSenderId: "470303085032",
+            appId: "1:470303085032:web:2980944aa37f17c1e6145d",
+            measurementId: "G-2DKEZ4MQJQ"
+            };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        // Initialize Firestore
+        const db = getFirestore(app);
+
+        // Initialize Google Places Autocomplete
+        function initAutocomplete() {
+            var input = document.getElementById('address');
+            var autocomplete = new google.maps.places.Autocomplete(input);
+
+            autocomplete.addListener('place_changed', function() {
+                var place = autocomplete.getPlace();
+                console.log('Place changed:', place);
+                if (!place.geometry) {
+                    document.getElementById('error-message').innerText = "Invalid address. Please enter a valid address.";
+                    document.getElementById('submit-button').disabled = true;
+                    return;
+                }
+
+                var latitude = place.geometry.location.lat();
+                var longitude = place.geometry.location.lng();
+
+                console.log('Latitude:', latitude, 'Longitude:', longitude);
+
+                if (latitude === 0 && longitude === 0) {
+                    document.getElementById('error-message').innerText = "Invalid address. Please enter a valid address.";
+                    document.getElementById('submit-button').disabled = true;
+                } else {
+                    document.getElementById('error-message').innerText = "";
+                    document.getElementById('submit-button').disabled = false;
+                    document.getElementById('latitude').value = latitude;
+                    document.getElementById('longitude').value = longitude;
+                }
+            });
+        }
+
+        // Call initAutocomplete when the page loads
+        window.onload = function() {
+            console.log('Page loaded');
+            initAutocomplete();
+            fetchDataAndDisplayMap();
+        };
+let map;
+        // Function to fetch and display data on the map
+        async function fetchDataAndDisplayMap() {
+            try {
+                const querySnapshot = await getDocs(collection(db, "locations"));
+                const locations = [];
+                querySnapshot.forEach((doc) => {
+                    locations.push(doc.data());
+                });
+
+                console.log('Fetched locations:', locations);
+
+                document.getElementById('location-count').innerText = locations.length;
+
+                // Initialize the map
+                map = L.map('map', {
+                    maxBounds: [
+                        [-85, -180], // Southwest coordinates
+                        [85, 180]    // Northeast coordinates
+                    ],
+                    maxBoundsViscosity: 1.0, // Optional: Makes the map "bounce" back when trying to pan outside the bounds
+                    minZoom: 2.2, // Minimum zoom level to prevent excessive zooming out
+                    maxZoom: 18 // Maximum zoom level
+                }).setView([40.4, -86.9], 13);
+
+                // Add Leaflet.js Tile Layer
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                }).addTo(map);
+
+                // Create a heatmap layer
+                var heatData = locations.map(function(location) {
+                    return [location.latitude, location.longitude, 1]; // The third value is the intensity
+                });
+
+                var heat = L.heatLayer(heatData, {
+                    radius: 30, // Radius of each "point" of the heatmap
+                    blur: 20,   // Amount of blur
+                    maxZoom: 17, // Maximum zoom level for the heatmap
+                    max: 1.0,
+                    gradient: { // Custom gradient for better visibility
+                        0.1: 'red',
+                        0.3: 'red',
+                        0.6: 'red',
+                        1.0: 'red'
+                    }
+                }).addTo(map);
+
+                // Add markers over the heatmap
+                locations.forEach(function(location) {
+                    L.circleMarker([location.latitude, location.longitude], {
+                        radius: 5, // Radius of the marker
+                        color: 'blue', // Color of the marker
+                        fillColor: 'blue', // Fill color of the marker
+                        fillOpacity: 1.0 // Opacity of the marker
+                    }).addTo(map);
+                });
+            } catch (error) {
+                console.error("Error fetching locations: ", error);
+            }
+        }
+
+        // Handle form submission
+        document.getElementById('address-form').addEventListener('submit', async function(event) {
+            event.preventDefault();
+
+            const latitude = document.getElementById('latitude').value;
+            const longitude = document.getElementById('longitude').value;
+            const address = document.getElementById('address').value;
+
+            console.log('Form submitted with:', { latitude, longitude, address });
+
+            try {
+                await addDoc(collection(db, "locations"), {
+                    latitude: parseFloat(latitude),
+                    longitude: parseFloat(longitude),
+                    address: address
+                });
+                alert('Address added successfully!');
+                fetchDataAndDisplayMap(); // Refresh the map with new data
+            } catch (error) {
+                console.error('Error adding address: ', error);
+            }
+        });
+    </script>
+</body>
+</html>
